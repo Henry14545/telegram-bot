@@ -1,3 +1,5 @@
 pyTelegramBotAPI
 openpyxl
 flask
+gspread
+google-auth
