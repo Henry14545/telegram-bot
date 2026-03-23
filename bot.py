@@ -26,7 +26,10 @@ bot = telebot.TeleBot(TOKEN)
 user_data = {}
 
 # ================= GOOGLE SHEETS =================
-scope = ["https://www.googleapis.com/auth/spreadsheets"]
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
 creds = Credentials.from_service_account_file(
     "/etc/secrets/credentials.json",
