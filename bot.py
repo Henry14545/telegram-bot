@@ -1,3 +1,13 @@
+from flask import Flask
+import threading
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from openpyxl import Workbook, load_workbook
@@ -171,4 +181,6 @@ def send_file(msg):
 
 # =============== RUN =================
 print("Bot running...")
+
+threading.Thread(target=run_flask).start()
 bot.infinity_polling()
