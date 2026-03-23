@@ -1,5 +1,13 @@
 from flask import Flask
 import threading
+import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+import os
+
+import gspread
+from google.oauth2.service_account import Credentials
+
+# ================= FLASK (RENDER FIX) =================
 app = Flask(__name__)
 
 @app.route('/')
@@ -8,70 +16,68 @@ def home():
 
 def run_flask():
     app.run(host="0.0.0.0", port=10000)
-import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from openpyxl import Workbook, load_workbook
-import os
 
-import os
+# ================= TELEGRAM =================
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = 1459646641
 
 bot = telebot.TeleBot(TOKEN)
 
-FILE = "orders.xlsx"
 user_data = {}
 
-# =============== EXCEL =================
-if not os.path.exists(FILE):
-    wb = Workbook()
-    ws = wb.active
-    ws.append(["User ID", "Customer Name", "Files Sent", "Order Count", "Payment Ref", "Status"])
-    wb.save(FILE)
+# ================= GOOGLE SHEETS =================
+scope = ["https://www.googleapis.com/auth/spreadsheets"]
 
+creds = Credentials.from_service_account_file(
+    "/etc/secrets/credentials.json",
+    scopes=scope
+)
+
+client = gspread.authorize(creds)
+sheet = client.open("Telegram Orders").sheet1
+
+# ================= FUNCTIONS =================
 def save_order(user_id, name, file_count, payment_ref, status):
-    wb = load_workbook(FILE)
-    ws = wb.active
+    data = sheet.get_all_values()
 
     count = 1
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0] == user_id:
-            count = max(count, row[3] + 1)
+    for row in data[1:]:
+        if str(row[0]) == str(user_id):
+            count = max(count, int(row[3]) + 1)
 
-    ws.append([user_id, name, file_count, count, payment_ref, status])
-    wb.save(FILE)
+    sheet.append_row([
+        user_id,
+        name,
+        file_count,
+        count,
+        payment_ref,
+        status
+    ])
 
 def get_total_files(user_id):
-    if not os.path.exists(FILE):
-        return 0
-
-    wb = load_workbook(FILE)
-    ws = wb.active
+    data = sheet.get_all_values()
 
     total = 0
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0] == user_id:
-            try:
-                total += int(row[2])
-            except:
-                pass
+    for row in data[1:]:
+        if str(row[0]) == str(user_id):
+            total += int(row[2])
 
     return total
 
-# =============== START =================
+# ================= START =================
 @bot.message_handler(commands=['start'])
 def start(msg):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(KeyboardButton("Buy File Slot"))
     bot.send_message(msg.chat.id, "Welcome!\nClick below to buy:", reply_markup=markup)
 
-# =============== BUY =================
+# ================= BUY =================
 @bot.message_handler(func=lambda m: m.chat.id != ADMIN_ID and m.text and m.text.lower() == "buy file slot")
 def buy(msg):
     bot.send_message(msg.chat.id, "💰 Send your payment reference")
     user_data[msg.chat.id] = {"step": "payment"}
 
-# =============== USER FLOW =================
+# ================= USER FLOW =================
 @bot.message_handler(func=lambda m: m.chat.id != ADMIN_ID, content_types=['text'])
 def handle(msg):
     uid = msg.chat.id
@@ -84,7 +90,7 @@ def handle(msg):
     username = msg.from_user.username or "NoUsername"
     name = f"{msg.from_user.first_name} {msg.from_user.last_name or ''}".strip()
 
-    # STEP 1: PAYMENT
+    # PAYMENT STEP
     if step == "payment":
         user_data[uid]["payment"] = msg.text
         user_data[uid]["name"] = name
@@ -112,7 +118,7 @@ def handle(msg):
         bot.send_message(uid, "⏳ Waiting approval...")
         user_data[uid]["step"] = "waiting"
 
-    # STEP 2: FILE NAME
+    # FILE NAME STEP
     elif step == "approved":
         user_data[uid]["file_name"] = msg.text
         user_data[uid]["file_count"] = 0
@@ -131,7 +137,7 @@ def handle(msg):
         bot.send_message(uid, "📦 Waiting for files...")
         user_data[uid]["step"] = "file_wait"
 
-# =============== BUTTON HANDLER =================
+# ================= BUTTON HANDLER =================
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     data = call.data
@@ -144,7 +150,7 @@ def callback(call):
 
     if action == "approve":
         user_data[uid]["step"] = "approved"
-        bot.send_message(uid, "✅ Payment approved!\nSend file name & follow this format- Assignment name: File name")
+        bot.send_message(uid, "✅ Payment approved!\nSend file name")
         bot.send_message(ADMIN_ID, f"✅ Approved {uid}")
 
     elif action == "reject":
@@ -165,7 +171,7 @@ def callback(call):
 
         user_data.pop(uid)
 
-# =============== SEND FILE =================
+# ================= SEND FILE =================
 @bot.message_handler(content_types=['document'])
 def send_file(msg):
     if msg.chat.id != ADMIN_ID:
@@ -175,11 +181,11 @@ def send_file(msg):
         if user_data[uid].get("step") == "file_wait":
             bot.send_document(uid, msg.document.file_id)
 
-            # increase file count
+            # increase count
             user_data[uid]["file_count"] += 1
             break
 
-# =============== RUN =================
+# ================= RUN =================
 print("Bot running...")
 
 threading.Thread(target=run_flask).start()
